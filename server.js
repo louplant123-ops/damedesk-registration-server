@@ -66,8 +66,8 @@ app.post('/api/registrations', async (req, res) => {
     await fs.writeFile(filepath, JSON.stringify(registrationData, null, 2));
     console.log(`✅ Registration saved to Railway: ${filename}`);
     
-    // Forward to local DameDesk system
-    await forwardToLocalDameDesk(registrationData);
+    // Save directly to OneDrive DameDesk folder
+    await saveToOneDriveFolder(registrationData);
     
     res.json({
       success: true,
@@ -84,35 +84,46 @@ app.post('/api/registrations', async (req, res) => {
   }
 });
 
-// Forward registration to local DameDesk system
-async function forwardToLocalDameDesk(registrationData) {
-  const LOCAL_DAMEDESK_URL = process.env.LOCAL_DAMEDESK_URL;
+// Save registration using GitHub API to your repository
+async function saveToOneDriveFolder(registrationData) {
+  const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+  const GITHUB_REPO = process.env.GITHUB_REPO; // format: "username/repo-name"
   
-  if (!LOCAL_DAMEDESK_URL) {
-    console.log('⚠️ No LOCAL_DAMEDESK_URL configured - registration stays on Railway only');
+  if (!GITHUB_TOKEN || !GITHUB_REPO) {
+    console.log('⚠️ GitHub integration not configured - registration stays on Railway only');
     return;
   }
   
   try {
-    console.log(`🔄 Forwarding to local DameDesk: ${LOCAL_DAMEDESK_URL}`);
+    console.log('💾 Saving registration to GitHub (syncs to OneDrive)...');
     
-    const response = await fetch(LOCAL_DAMEDESK_URL, {
-      method: 'POST',
+    const filename = `${registrationData.id}.json`;
+    const filePath = `DameDesk_Data/registrations/pending/${filename}`;
+    const content = Buffer.from(JSON.stringify(registrationData, null, 2)).toString('base64');
+    
+    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${filePath}`, {
+      method: 'PUT',
       headers: {
+        'Authorization': `token ${GITHUB_TOKEN}`,
         'Content-Type': 'application/json',
-        'X-API-Key': 'railway-forward-key'
       },
-      body: JSON.stringify(registrationData)
+      body: JSON.stringify({
+        message: `Add registration: ${registrationData.firstName} ${registrationData.lastName}`,
+        content: content,
+        branch: 'main'
+      })
     });
     
     if (response.ok) {
-      console.log('✅ Successfully forwarded to local DameDesk');
+      console.log(`✅ Registration saved to GitHub: ${filePath}`);
+      console.log('🔄 OneDrive will sync automatically from GitHub');
     } else {
-      console.log(`⚠️ Local DameDesk responded with status: ${response.status}`);
+      console.log(`⚠️ GitHub save failed with status: ${response.status}`);
     }
+    
   } catch (error) {
-    console.log(`⚠️ Failed to forward to local DameDesk: ${error.message}`);
-    // Don't throw error - registration is still saved on Railway
+    console.log(`⚠️ Failed to save to GitHub: ${error.message}`);
+    // Don't throw error - registration is still saved on Railway as backup
   }
 }
 
