@@ -1,0 +1,34 @@
+{
+  "id": "REG_1759830264348_12bfy2tbx",
+  "timestamp": "2025-10-07T09:44:24.348Z",
+  "firstName": "Two",
+  "lastName": "Two",
+  "email": "teo@teo.com",
+  "phone": "07111222333",
+  "dateOfBirth": "2025-10-07",
+  "address": "",
+  "postcode": "Le8 6ad",
+  "rightToWork": "uk_citizen",
+  "visaType": "",
+  "visaExpiry": "",
+  "jobTypes": [
+    "temporary"
+  ],
+  "industries": [
+    "warehousing"
+  ],
+  "experience": "",
+  "shifts": [
+    "nights"
+  ],
+  "availability": "",
+  "transport": "motorbike",
+  "drivingLicense": false,
+  "ownVehicle": false,
+  "fltLicense": false,
+  "fltTypes": [],
+  "otherLicenses": "",
+  "registrationType": "temp",
+  "source": "railway_server",
+  "processed": false
+}
