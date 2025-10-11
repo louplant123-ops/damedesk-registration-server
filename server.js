@@ -2,10 +2,37 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
+const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3002;
+
+// DigitalOcean PostgreSQL connection
+const pool = new Pool({
+  host: 'damedesk-crm-production-do-user-27348714-0.j.db.ondigitalocean.com',
+  port: 25060,
+  database: 'defaultdb',
+  user: 'doadmin',
+  password: 'AVNS_wm_vFxOY5--ftSp64EL',
+  ssl: {
+    rejectUnauthorized: false
+  },
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+});
+
+// Test database connection on startup
+async function testDatabaseConnection() {
+  try {
+    const client = await pool.connect();
+    console.log('✅ Connected to DigitalOcean PostgreSQL');
+    client.release();
+  } catch (error) {
+    console.error('❌ Database connection failed:', error);
+  }
+}
 
 // Middleware
 app.use(cors({
@@ -19,7 +46,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
-// Ensure directories exist
+// Ensure directories exist (for backup files)
 async function ensureDirectories() {
   const dirs = [
     'pending-registrations',
@@ -42,9 +69,71 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    service: 'DameDesk Registration Server'
+    service: 'DameDesk Registration Server',
+    database: 'DigitalOcean PostgreSQL'
   });
 });
+
+// Convert registration data to candidate format
+function convertToCandidateFormat(registrationData) {
+  const candidateId = `CAND_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  return {
+    id: candidateId,
+    name: `${registrationData.firstName} ${registrationData.lastName}`,
+    email: registrationData.email,
+    phone: registrationData.phone,
+    type: 'candidate',
+    status: 'active',
+    temperature: 'warm',
+    company: registrationData.company || '',
+    position: registrationData.position || '',
+    location: `${registrationData.address || ''}, ${registrationData.postcode || ''}`,
+    postcode: registrationData.postcode || '',
+    skills: registrationData.skills || '',
+    experience_level: registrationData.experienceLevel || '',
+    hourly_rate: registrationData.hourlyRate || null,
+    availability: registrationData.availability || '',
+    right_to_work: registrationData.rightToWork || '',
+    travel_method: registrationData.travelMethod || '',
+    contract_preference: registrationData.contractPreference || '',
+    shift_availability: registrationData.shiftAvailability || '',
+    notes: `Website registration completed on ${new Date().toLocaleDateString()}. Original registration ID: ${registrationData.id}`,
+    source: 'website_registration_railway',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+}
+
+// Save candidate to DigitalOcean PostgreSQL
+async function saveCandidateToDatabase(candidate) {
+  const client = await pool.connect();
+  try {
+    const query = `
+      INSERT INTO contacts (
+        id, name, email, phone, type, status, temperature, company, position, 
+        location, postcode, skills, experience_level, hourly_rate, availability,
+        right_to_work, travel_method, contract_preference, shift_availability,
+        notes, source, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+      RETURNING *
+    `;
+    const values = [
+      candidate.id, candidate.name, candidate.email, candidate.phone, candidate.type,
+      candidate.status, candidate.temperature, candidate.company, candidate.position,
+      candidate.location, candidate.postcode, candidate.skills, candidate.experience_level, 
+      candidate.hourly_rate, candidate.availability, candidate.right_to_work, candidate.travel_method, 
+      candidate.contract_preference, candidate.shift_availability, candidate.notes, candidate.source, 
+      candidate.created_at, candidate.updated_at
+    ];
+    
+    const result = await client.query(query, values);
+    console.log(`✅ Candidate saved to DigitalOcean: ${candidate.name}`);
+    return result.rows[0];
+  } finally {
+    client.release();
+  }
+}
 
 // Candidate Registration Endpoint
 app.post('/api/registrations', async (req, res) => {
@@ -59,46 +148,54 @@ app.post('/api/registrations', async (req, res) => {
       processed: false
     };
 
-    // Save to Railway's temporary storage (for backup)
+    // Convert to candidate format
+    const candidate = convertToCandidateFormat(registrationData);
+
+    // Save directly to DigitalOcean PostgreSQL
+    await saveCandidateToDatabase(candidate);
+    console.log(`🎉 Registration processed and saved to cloud database: ${candidate.name}`);
+
+    // Save backup to Railway's temporary storage
     const filename = `${registrationData.id}.json`;
     const filepath = path.join('pending-registrations', filename);
-    
     await fs.writeFile(filepath, JSON.stringify(registrationData, null, 2));
-    console.log(`✅ Registration saved to Railway: ${filename}`);
+    console.log(`💾 Backup saved to Railway: ${filename}`);
     
-    // Save directly to OneDrive DameDesk folder
-    await saveToOneDriveFolder(registrationData);
+    // Also save to GitHub for additional backup
+    await saveToGitHubBackup(registrationData);
     
     res.json({
       success: true,
-      message: 'Registration received and forwarded to local system',
-      registrationId: registrationData.id
+      message: 'Registration received and saved to cloud database',
+      registrationId: registrationData.id,
+      candidateId: candidate.id
     });
     
   } catch (error) {
     console.error('❌ Registration error:', error);
     res.status(500).json({
       success: false,
-      error: 'Registration processing failed'
+      error: 'Registration processing failed',
+      details: error.message
     });
   }
 });
 
-// Save registration using GitHub API to your repository
-async function saveToOneDriveFolder(registrationData) {
+// Save registration backup to GitHub
+async function saveToGitHubBackup(registrationData) {
   const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-  const GITHUB_REPO = process.env.GITHUB_REPO; // format: "username/repo-name"
+  const GITHUB_REPO = process.env.GITHUB_REPO;
   
   if (!GITHUB_TOKEN || !GITHUB_REPO) {
-    console.log('⚠️ GitHub integration not configured - registration stays on Railway only');
+    console.log('⚠️ GitHub backup not configured');
     return;
   }
   
   try {
-    console.log('💾 Saving registration to GitHub (syncs to OneDrive)...');
+    console.log('💾 Saving backup to GitHub...');
     
     const filename = `${registrationData.id}.json`;
-    const filePath = `DameDesk_Data/registrations/pending/${filename}`;
+    const filePath = `DameDesk_Data/registrations/processed/${filename}`;
     const content = Buffer.from(JSON.stringify(registrationData, null, 2)).toString('base64');
     
     const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${filePath}`, {
@@ -108,22 +205,20 @@ async function saveToOneDriveFolder(registrationData) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        message: `Add registration: ${registrationData.firstName} ${registrationData.lastName}`,
+        message: `Add processed registration: ${registrationData.firstName} ${registrationData.lastName}`,
         content: content,
         branch: 'main'
       })
     });
     
     if (response.ok) {
-      console.log(`✅ Registration saved to GitHub: ${filePath}`);
-      console.log('🔄 OneDrive will sync automatically from GitHub');
+      console.log(`✅ Backup saved to GitHub: ${filePath}`);
     } else {
-      console.log(`⚠️ GitHub save failed with status: ${response.status}`);
+      console.log(`⚠️ GitHub backup failed with status: ${response.status}`);
     }
     
   } catch (error) {
-    console.log(`⚠️ Failed to save to GitHub: ${error.message}`);
-    // Don't throw error - registration is still saved on Railway as backup
+    console.log(`⚠️ Failed to save GitHub backup: ${error.message}`);
   }
 }
 
@@ -197,131 +292,28 @@ app.post('/api/client-registrations', async (req, res) => {
   }
 });
 
-// Holiday Request Endpoint (for future use)
-app.post('/api/holiday-requests', async (req, res) => {
+// Get database statistics
+app.get('/api/stats', async (req, res) => {
   try {
-    console.log('🏖️ Holiday request received');
+    const client = await pool.connect();
     
-    const holidayData = {
-      id: `HOLIDAY_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: new Date().toISOString(),
-      ...req.body,
-      status: 'pending'
-    };
-
-    // Save to organized folder structure
-    const filename = `${holidayData.id}.json`;
-    const filepath = path.join('DameDesk_Data', 'holiday_requests', filename);
+    const contactsResult = await client.query('SELECT COUNT(*) FROM contacts');
+    const jobsResult = await client.query('SELECT COUNT(*) FROM jobs');
+    const tasksResult = await client.query('SELECT COUNT(*) FROM tasks');
     
-    await fs.writeFile(filepath, JSON.stringify(holidayData, null, 2));
-    
-    console.log(`✅ Holiday request saved: ${filename}`);
+    client.release();
     
     res.json({
-      success: true,
-      message: 'Holiday request submitted',
-      requestId: holidayData.id
+      contacts: parseInt(contactsResult.rows[0].count),
+      jobs: parseInt(jobsResult.rows[0].count),
+      tasks: parseInt(tasksResult.rows[0].count),
+      database: 'DigitalOcean PostgreSQL',
+      status: 'connected'
     });
-    
   } catch (error) {
-    console.error('❌ Holiday request error:', error);
     res.status(500).json({
-      success: false,
-      error: 'Holiday request failed'
-    });
-  }
-});
-
-// Get pending registrations (for DameDesk CRM)
-app.get('/api/registrations/pending', async (req, res) => {
-  try {
-    const files = await fs.readdir('pending-registrations');
-    const registrations = [];
-    
-    for (const file of files) {
-      if (file.endsWith('.json') && !file.includes('processed')) {
-        const filepath = path.join('pending-registrations', file);
-        const content = await fs.readFile(filepath, 'utf8');
-        registrations.push(JSON.parse(content));
-      }
-    }
-    
-    // Sort by timestamp (newest first)
-    registrations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    
-    res.json(registrations);
-  } catch (error) {
-    console.error('❌ Error fetching registrations:', error);
-    res.status(500).json({ error: 'Failed to fetch registrations' });
-  }
-});
-
-// Mark registration as processed
-app.post('/api/registrations/:id/process', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const sourceFile = path.join('pending-registrations', `${id}.json`);
-    const targetFile = path.join('pending-registrations', 'processed', `${id}.json`);
-    
-    // Read the file
-    const content = await fs.readFile(sourceFile, 'utf8');
-    const registration = JSON.parse(content);
-    
-    // Mark as processed
-    registration.processed = true;
-    registration.processedAt = new Date().toISOString();
-    
-    // Move to processed folder
-    await fs.writeFile(targetFile, JSON.stringify(registration, null, 2));
-    await fs.unlink(sourceFile);
-    
-    console.log(`✅ Registration ${id} marked as processed`);
-    
-    res.json({
-      success: true,
-      message: 'Registration marked as processed'
-    });
-    
-  } catch (error) {
-    console.error('❌ Error processing registration:', error);
-    res.status(500).json({ error: 'Failed to process registration' });
-  }
-});
-
-// File upload endpoint (for CVs, certificates, etc.)
-app.post('/api/upload', async (req, res) => {
-  try {
-    const { filename, content, type, candidateId } = req.body;
-    
-    // Ensure uploads directory exists
-    await fs.mkdir('uploads', { recursive: true });
-    
-    // Save file
-    const filepath = path.join('uploads', filename);
-    
-    if (type === 'base64') {
-      // Handle base64 encoded files
-      const buffer = Buffer.from(content, 'base64');
-      await fs.writeFile(filepath, buffer);
-    } else {
-      // Handle text files
-      await fs.writeFile(filepath, content);
-    }
-    
-    console.log(`📎 File uploaded: ${filename}`);
-    
-    res.json({
-      success: true,
-      message: 'File uploaded successfully',
-      filename: filename,
-      path: filepath
-    });
-    
-  } catch (error) {
-    console.error('❌ File upload error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'File upload failed'
+      error: 'Database query failed',
+      details: error.message
     });
   }
 });
@@ -332,9 +324,11 @@ app.listen(port, async () => {
   console.log(`📊 Health check: http://localhost:${port}/health`);
   console.log(`📝 Registration endpoint: http://localhost:${port}/api/registrations`);
   console.log(`📋 Assignment endpoint: http://localhost:${port}/api/assignments/confirm`);
+  console.log(`📈 Stats endpoint: http://localhost:${port}/api/stats`);
   
   await ensureDirectories();
-  console.log('✅ Directories initialized');
+  await testDatabaseConnection();
+  console.log('✅ Server initialized with DigitalOcean PostgreSQL');
 });
 
 module.exports = app;
