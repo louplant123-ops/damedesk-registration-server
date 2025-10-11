@@ -1,0 +1,34 @@
+{
+  "id": "REG_1760175689079_1loya284h",
+  "timestamp": "2025-10-11T09:41:29.080Z",
+  "firstName": "Lou",
+  "lastName": "april",
+  "email": "louiseplant11@hotmail.co.uk",
+  "phone": "07780681759",
+  "dateOfBirth": "",
+  "address": "19 Meteor Way",
+  "postcode": "le8 6ad",
+  "rightToWork": "uk_citizen",
+  "visaType": "",
+  "visaExpiry": "",
+  "jobTypes": [
+    "temporary"
+  ],
+  "industries": [
+    "warehousing"
+  ],
+  "experience": "",
+  "shifts": [
+    "days"
+  ],
+  "availability": "",
+  "transport": "public_transport",
+  "drivingLicense": false,
+  "ownVehicle": false,
+  "fltLicense": false,
+  "fltTypes": [],
+  "otherLicenses": "",
+  "registrationType": "temp",
+  "source": "railway_server",
+  "processed": false
+}
