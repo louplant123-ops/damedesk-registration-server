@@ -1,0 +1,40 @@
+{
+  "id": "REG_1760342580202_d3ojv78ns",
+  "timestamp": "2025-10-13T08:03:00.202Z",
+  "firstName": "Bellie",
+  "lastName": "Bones",
+  "email": "louiseplant11@hotmail.co.uk",
+  "phone": "07780681759",
+  "mobile": "07780681759",
+  "dateOfBirth": "2025-10-13",
+  "address": "19 Meteor Way",
+  "postcode": "le8 6ad",
+  "gender": "",
+  "nationality": "British",
+  "medicalConditions": "asthma",
+  "disabilityInfo": "limp",
+  "reasonableAdjustments": "special chair",
+  "rightToWork": "uk_citizen",
+  "visaType": "",
+  "visaExpiry": "",
+  "jobTypes": [
+    "temporary"
+  ],
+  "industries": [
+    "warehousing"
+  ],
+  "experience": "",
+  "shifts": [
+    "weekends"
+  ],
+  "availability": "",
+  "transport": "motorbike",
+  "drivingLicense": false,
+  "ownVehicle": false,
+  "fltLicense": false,
+  "fltTypes": [],
+  "otherLicenses": "",
+  "registrationType": "temp",
+  "source": "railway_server",
+  "processed": false
+}
